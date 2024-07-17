@@ -1,0 +1,9 @@
+services:
+
+  app:
+    build:
+      ./app
+    ports:
+      - '8888:1569'
+    container_name: app
+    restart: always
