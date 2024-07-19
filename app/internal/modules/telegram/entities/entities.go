@@ -1,26 +1,9 @@
 package entities
 
-type Type int
-
-const (
-	Unknown Type = iota
-	Message
-)
-
-type Meta struct {
-	ChatID   int
-	Username string
-}
-
-type Event struct {
-	Type Type
-	Text string
-	Meta interface{}
-}
-
 type UpdatesResponse struct {
-	Ok     bool     `json:"ok"`
-	Result []Update `json:"result"`
+	Ok          bool     `json:"ok"`
+	Description string   `json:"description,omitempty"`
+	Result      []Update `json:"result"`
 }
 
 type Update struct {

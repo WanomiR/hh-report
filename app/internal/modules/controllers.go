@@ -1,19 +1,13 @@
 package modules
 
-import (
-	tgclcontroller "app/internal/modules/telegram/client/controller"
-	tgevcontroller "app/internal/modules/telegram/events/controller"
-)
+import tgcontroller "app/internal/modules/telegram/controller"
 
 type Controllers struct {
-	TgClient tgclcontroller.TgClientController
-	TgEvents tgevcontroller.TgEventsController
+	Tg tgcontroller.TgController
 }
 
-func NewControllers(tgClient tgclcontroller.TgClientController, tgEvents tgevcontroller.TgEventsController) *Controllers {
-	ctrl := &Controllers{
-		TgClient: tgClient,
-		TgEvents: tgEvents,
+func NewControllers(tgController tgcontroller.TgController) *Controllers {
+	return &Controllers{
+		Tg: tgController,
 	}
-	return ctrl
 }

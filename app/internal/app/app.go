@@ -3,21 +3,15 @@ package app
 import (
 	"app/internal/lib/e"
 	"app/internal/modules"
-	tgclcontroller "app/internal/modules/telegram/client/controller"
-	tgclvservice "app/internal/modules/telegram/client/service"
-	"app/internal/modules/telegram/entities"
-	tgevcontroller "app/internal/modules/telegram/events/controller"
-	tgevservice "app/internal/modules/telegram/events/service"
+	tgcontroller "app/internal/modules/telegram/controller"
+	tgservice "app/internal/modules/telegram/service"
 	"context"
 	"github.com/joho/godotenv"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 )
-
-const batchSize = 100
 
 type Config struct {
 	tgHost     string
@@ -47,43 +41,11 @@ func (a *App) Signal() <-chan os.Signal {
 	return a.signalChan
 }
 
-func (a *App) Run() {
+func (a *App) Run(ctx context.Context) {
 	log.Println("Firing up the app...")
-	for {
-		events, err := a.controllers.TgEvents.Fetch(context.Background(), batchSize)
-		if err != nil {
-			log.Println("error fetching updates: ", err.Error())
 
-			continue
-		}
+	go a.controllers.Tg.Serve(ctx)
 
-		if len(events) == 0 {
-			time.Sleep(1 * time.Second)
-
-			continue
-		}
-
-		if err := a.handleEvents(context.Background(), events); err != nil {
-			log.Println("error handling events: ", err.Error())
-
-			continue
-		}
-
-	}
-}
-
-func (a *App) handleEvents(ctx context.Context, events []entities.Event) error {
-	for _, event := range events {
-		log.Printf("got new event: %s", event.Text)
-
-		if err := a.controllers.TgEvents.Process(ctx, event); err != nil {
-			log.Printf("can't handle event: %s", err.Error())
-
-			continue
-		}
-	}
-
-	return nil
 }
 
 func (a *App) readConfig(envPath ...string) (err error) {
@@ -111,14 +73,11 @@ func (a *App) init() error {
 		return err
 	}
 
-	tgClientService := tgclvservice.NewTgService(a.config.tgHost, a.config.tgApiToken)
-	tgClientController := tgclcontroller.NewTgControl(tgClientService)
+	tgs := tgservice.NewTgService(a.config.tgHost, a.config.tgApiToken, 100, 0)
+	tgc := tgcontroller.NewTgControl(tgs)
 
-	tgEventsService := tgevservice.NewTgEventsService(tgClientController)
-	tgEventsController := tgevcontroller.NewTgEventsControl(tgEventsService)
-
-	a.services = modules.NewServices(tgClientService, tgEventsService)
-	a.controllers = modules.NewControllers(tgClientController, tgEventsController)
+	a.services = modules.NewServices(tgs)
+	a.controllers = modules.NewControllers(tgc)
 
 	a.signalChan = make(chan os.Signal, 1)
 	signal.Notify(a.signalChan, syscall.SIGINT, syscall.SIGTERM)

@@ -1,19 +1,15 @@
 package modules
 
 import (
-	tgclvservice "app/internal/modules/telegram/client/service"
-	tgevservice "app/internal/modules/telegram/events/service"
+	tgservice "app/internal/modules/telegram/service"
 )
 
 type Services struct {
-	TgClient tgclvservice.TgClientServicer
-	TgEvents tgevservice.TgEventsServicer
+	Tg tgservice.TgServicer
 }
 
-func NewServices(tgClient tgclvservice.TgClientServicer, tgEvents tgevservice.TgEventsServicer) *Services {
-	srv := &Services{
-		TgClient: tgClient,
-		TgEvents: tgEvents,
+func NewServices(tgService tgservice.TgServicer) *Services {
+	return &Services{
+		Tg: tgService,
 	}
-	return srv
 }
