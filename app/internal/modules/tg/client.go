@@ -24,39 +24,34 @@ const (
 type Telegramer interface {
 	GetUpdates() ([]Update, error)
 	ProcessUpdates(updates []Update)
-	Serve()
 }
 
 type Client struct {
 	host     string
 	basePath string
-	client   *http.Client
+	tgClient *http.Client
+	hhClient hh.HeadHunterer
 	offset   int
 	limit    int
 	timeout  int
 	workers  map[int]*Worker
 	reAdd    *regexp.Regexp
 	reRemove *regexp.Regexp
-	hhClient hh.HeadHunterer
 }
 
 func NewTgClient(host string, token string, batchSize, timeout int, hhClient hh.HeadHunterer) *Client {
 	return &Client{
 		host:     host,          // api.tg.org
 		basePath: "bot" + token, // app<token>
-		client:   new(http.Client),
+		tgClient: new(http.Client),
+		hhClient: hhClient,
 		offset:   0,
 		limit:    batchSize,
 		timeout:  timeout,
 		workers:  make(map[int]*Worker),
-		//reAdd:    regexp.MustCompile(`add: \d+ \d+ \w+ (\d-\d|\d)`),
 		reAdd:    regexp.MustCompile(`add: \d+ \d+ \w+ (-|0|1-3|3-6|6)`),
 		reRemove: regexp.MustCompile(`remove: \d+`),
-		hhClient: hhClient,
 	}
-}
-
-func (c *Client) Serve() {
 }
 
 func (c *Client) GetUpdates() (updates []Update, err error) {
@@ -221,7 +216,7 @@ func (c *Client) doRequest(method string, query url.Values) (data []byte, err er
 
 	req.URL.RawQuery = query.Encode()
 
-	resp, err := c.client.Do(req)
+	resp, err := c.tgClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
