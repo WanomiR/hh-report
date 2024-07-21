@@ -1,8 +1,8 @@
-package entities
+package hh
 
 // https://api.hh.ru/openapi/redoc#tag/Poisk-vakansij/operation/get-vacancies
 
-type ResponseVacancies struct {
+type VacanciesResponse struct {
 	Arguments []Argument `json:"arguments"`
 	Clusters  any        `json:"clusters"`
 	Fixes     any        `json:"fixes"`

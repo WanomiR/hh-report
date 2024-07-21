@@ -1,4 +1,4 @@
-package entities
+package tg
 
 type UpdatesResponse struct {
 	Ok          bool     `json:"ok"`
@@ -27,4 +27,12 @@ type User struct {
 type Chat struct {
 	ID   int    `json:"id"`
 	Type string `json:"type"`
+}
+
+type Query struct {
+	Id               int
+	Area             int
+	ProfessionalRole int
+	Text             string
+	Experience       string
 }

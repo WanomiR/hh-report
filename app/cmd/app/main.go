@@ -14,15 +14,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go a.Run(ctx)
+	go a.Run()
 
 	<-a.Signal()
-
 	fmt.Println("Shutting down the app...")
-	ctx, _ = context.WithTimeout(ctx, 1*time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
 
 	<-ctx.Done()
 }

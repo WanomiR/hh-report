@@ -2,30 +2,27 @@ package app
 
 import (
 	"app/internal/lib/e"
-	"app/internal/modules"
-	tgcontroller "app/internal/modules/telegram/controller"
-	tgservice "app/internal/modules/telegram/service"
-	"context"
+	"app/internal/modules/hh"
+	"app/internal/modules/tg"
 	"github.com/joho/godotenv"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 type Config struct {
-	tgHost         string
-	tgApiToken     string
-	hhHost         string
-	hhClientId     string
-	hhClientSecret string
+	tgHost     string
+	tgApiToken string
+	hhHost     string
 }
 
 type App struct {
-	config      Config
-	signalChan  chan os.Signal
-	services    *modules.Services
-	controllers *modules.Controllers
+	config     Config
+	signalChan chan os.Signal
+	hhClient   hh.HeadHunterer
+	tgClient   tg.Telegramer
 }
 
 func NewApp() (a *App, err error) {
@@ -44,10 +41,25 @@ func (a *App) Signal() <-chan os.Signal {
 	return a.signalChan
 }
 
-func (a *App) Run(ctx context.Context) {
+func (a *App) Run() {
 	log.Println("Firing up the app...")
 
-	go a.controllers.Tg.Serve(ctx)
+	for {
+		// get updates every second
+		time.Sleep(1 * time.Second)
+
+		updates, err := a.tgClient.GetUpdates()
+		if err != nil {
+			log.Println(err.Error()) // skip if an error
+			continue
+		}
+
+		if len(updates) == 0 { // skip if no updates
+			continue
+		}
+
+		a.tgClient.ProcessUpdates(updates)
+	}
 
 }
 
@@ -64,10 +76,7 @@ func (a *App) readConfig(envPath ...string) (err error) {
 
 	a.config.tgHost = os.Getenv("TG_HOST")
 	a.config.tgApiToken = os.Getenv("TG_API_TOKEN")
-
 	a.config.hhHost = os.Getenv("HH_HOST")
-	a.config.hhClientId = os.Getenv("HH_CLIENT_ID")
-	a.config.hhClientSecret = os.Getenv("HH_CLIENT_SECRET")
 
 	return nil
 }
@@ -80,11 +89,8 @@ func (a *App) init() error {
 		return err
 	}
 
-	tgs := tgservice.NewTgService(a.config.tgHost, a.config.tgApiToken, 100, 0)
-	tgc := tgcontroller.NewTgControl(tgs)
-
-	a.services = modules.NewServices(tgs)
-	a.controllers = modules.NewControllers(tgc)
+	a.hhClient = hh.NewHhClient(a.config.hhHost)
+	a.tgClient = tg.NewTgClient(a.config.tgHost, a.config.tgApiToken, 100, 0, a.hhClient)
 
 	a.signalChan = make(chan os.Signal, 1)
 	signal.Notify(a.signalChan, syscall.SIGINT, syscall.SIGTERM)
