@@ -14,8 +14,11 @@ import (
 )
 
 type Config struct {
-	tgHost     string
-	tgApiToken string
+	tgHost         string
+	tgApiToken     string
+	hhHost         string
+	hhClientId     string
+	hhClientSecret string
 }
 
 type App struct {
@@ -61,6 +64,10 @@ func (a *App) readConfig(envPath ...string) (err error) {
 
 	a.config.tgHost = os.Getenv("TG_HOST")
 	a.config.tgApiToken = os.Getenv("TG_API_TOKEN")
+
+	a.config.hhHost = os.Getenv("HH_HOST")
+	a.config.hhClientId = os.Getenv("HH_CLIENT_ID")
+	a.config.hhClientSecret = os.Getenv("HH_CLIENT_SECRET")
 
 	return nil
 }

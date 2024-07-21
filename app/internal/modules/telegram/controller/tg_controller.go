@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+type TgController interface {
+	Serve(ctx context.Context)
+}
+
 type TgControl struct {
 	service service.TgServicer
 }

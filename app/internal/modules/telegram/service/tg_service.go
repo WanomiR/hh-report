@@ -20,6 +20,11 @@ const (
 	methodSendMessage = "sendMessage" // Use this method to send text messages. On success, the sent Message is returned
 )
 
+type TgServicer interface {
+	GetUpdates(ctx context.Context) ([]entities.Update, error)
+	ProcessUpdates(ctx context.Context, updates []entities.Update)
+}
+
 type TgService struct {
 	host     string
 	basePath string
@@ -85,7 +90,6 @@ func (s *TgService) ProcessUpdates(ctx context.Context, updates []entities.Updat
 
 		if err := s.processMessage(ctx, message); err != nil {
 			log.Println(err.Error())
-			continue
 		}
 	}
 
@@ -132,14 +136,14 @@ func (s *TgService) sendMessage(ctx context.Context, chatId int, text string) er
 	return nil
 }
 
-func (s *TgService) doRequest(ctx context.Context, tgMethod string, query url.Values) (data []byte, err error) {
+func (s *TgService) doRequest(ctx context.Context, method string, query url.Values) (data []byte, err error) {
 	defer func() { err = e.WrapIfErr("cannot do request", err) }()
 
 	// https://api.telegram.org/bot<token>/METHOD_NAME
 	requestUrl := url.URL{
 		Scheme: "https",
 		Host:   s.host,
-		Path:   path.Join(s.basePath, tgMethod),
+		Path:   path.Join(s.basePath, method),
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestUrl.String(), nil)
