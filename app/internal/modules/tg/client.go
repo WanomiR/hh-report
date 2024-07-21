@@ -49,8 +49,9 @@ func NewTgClient(host string, token string, batchSize, timeout int, hhClient hh.
 		limit:    batchSize,
 		timeout:  timeout,
 		workers:  make(map[int]*Worker),
-		reAdd:    regexp.MustCompile(`add: [\d]+ [\d+]+ [\w]+ (\d-\d|\d)`),
-		reRemove: regexp.MustCompile(`remove: [\d]+`),
+		//reAdd:    regexp.MustCompile(`add: \d+ \d+ \w+ (\d-\d|\d)`),
+		reAdd:    regexp.MustCompile(`add: \d+ \d+ \w+ (-|0|1-3|3-6|6)`),
+		reRemove: regexp.MustCompile(`remove: \d+`),
 		hhClient: hhClient,
 	}
 }
@@ -110,12 +111,26 @@ func (c *Client) processMessage(message *Message) {
 	switch {
 	case strings.HasPrefix(message.Text, "/"):
 		c.processCommand(message.Text, worker)
+
 	case c.reAdd.MatchString(message.Text):
-		// handle adding an option
-		c.sendMessage(worker.ChatId, "It's a match!")
+		// adding new query to the worker
+		match := c.reAdd.FindStringSubmatch(message.Text)[0]
+		// handle possible error
+		if err := worker.HandleAddQuery(match); err != nil {
+			c.sendMessage(worker.ChatId, e.WrapIfErr("error adding query", err).Error())
+		} else {
+			c.sendMessage(worker.ChatId, "Query added 👌🏻")
+		}
+
 	case c.reRemove.MatchString(message.Text):
-		// handle removing an option
-		c.sendMessage(worker.ChatId, "It's a match!")
+		match := c.reRemove.FindStringSubmatch(message.Text)[0]
+		// handle possible error
+		if err := worker.RemoveQuery(match); err != nil {
+			c.sendMessage(worker.ChatId, e.WrapIfErr("error removing query", err).Error())
+		} else {
+			c.sendMessage(worker.ChatId, "Query removed 🗑️")
+		}
+
 	default:
 		// just mirror for now
 		c.sendMessage(worker.ChatId, message.Text)
@@ -125,7 +140,11 @@ func (c *Client) processMessage(message *Message) {
 func (c *Client) handleWorker(chatId int) *Worker {
 	worker, ok := c.workers[chatId]
 	if !ok {
-		worker = &Worker{ChatId: chatId, StopWorking: make(chan bool)}
+		worker = &Worker{
+			ChatId:      chatId,
+			StopWorking: make(chan bool),
+			queries:     make([]Query, 0),
+		}
 		c.workers[chatId] = worker
 	}
 	return worker
@@ -133,6 +152,7 @@ func (c *Client) handleWorker(chatId int) *Worker {
 
 func (c *Client) processCommand(command string, worker *Worker) {
 	switch command {
+
 	case "/check":
 		data, err := c.hhClient.GetVacancies("1", "96", "golang", "noExperience")
 		if err != nil {
@@ -141,18 +161,31 @@ func (c *Client) processCommand(command string, worker *Worker) {
 			log.Println("vacancies found:", len(data))
 		}
 		c.sendMessage(worker.ChatId, "checked")
+
 	case "/start":
 		// TODO:
 		//  - show help if there are no queries
 		//  - otherwise launch workers on current queries
+
 	case "/help":
-		// TODO: show help how to use app
+		c.sendMessage(worker.ChatId, messageHelp)
+
 	case "/queries":
-		// TODO: list existing queries
+		if queries := worker.ListQueries(); len(queries) > 0 {
+			c.sendMessage(worker.ChatId, "Active queries:")
+			for _, query := range worker.ListQueries() {
+				c.sendMessage(worker.ChatId, query)
+			}
+		} else {
+			c.sendMessage(worker.ChatId, "No active queries")
+		}
+
 	case "/status":
 		// TODO: show the number of active workers in this chat
+
 	case "/stop":
 		// TODO: stop all workers
+
 	default:
 		c.sendMessage(worker.ChatId, "Unknown command")
 	}
@@ -161,8 +194,9 @@ func (c *Client) processCommand(command string, worker *Worker) {
 func (c *Client) sendMessage(chatId int, text string) {
 
 	query := url.Values{
-		"chat_id": []string{strconv.Itoa(chatId)},
-		"text":    []string{text},
+		"chat_id":    []string{strconv.Itoa(chatId)},
+		"text":       []string{text},
+		"parse_mode": []string{"HTML"},
 	}
 
 	if _, err := c.doRequest(methodSendMessage, query); err != nil {
