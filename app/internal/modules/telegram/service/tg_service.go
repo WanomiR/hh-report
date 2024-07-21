@@ -13,6 +13,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -32,6 +33,7 @@ type TgService struct {
 	offset   int
 	limit    int
 	timeout  int
+	chats    map[int]*entities.TgChat
 }
 
 func NewTgService(host string, token string, batchSize, timeout int) *TgService {
@@ -42,6 +44,7 @@ func NewTgService(host string, token string, batchSize, timeout int) *TgService 
 		offset:   0,
 		limit:    batchSize,
 		timeout:  timeout,
+		chats:    make(map[int]*entities.TgChat),
 	}
 }
 
@@ -85,44 +88,57 @@ func (s *TgService) ProcessUpdates(ctx context.Context, updates []entities.Updat
 			continue
 		}
 
-		message := update.Message
-		log.Println("got new message: ", message.Text)
-
-		if err := s.processMessage(ctx, message); err != nil {
-			log.Println(err.Error())
-		}
+		s.processMessage(ctx, update.Message)
 	}
-
 }
 
-func (s *TgService) processMessage(ctx context.Context, message *entities.IncomingMessage) (err error) {
+func (s *TgService) processMessage(ctx context.Context, message *entities.Message) {
+	chat := s.handleChat(message.Chat.ID)
+
+	log.Println("got new message:", message.Text, fmt.Sprintf("ℹ️ [chat id: %d, isTicking: %v]", chat.Id, chat.IsTicking))
 
 	if strings.HasPrefix(message.Text, "/") {
 		switch message.Text {
 		case "/start":
-			if err = s.sendMessage(ctx, message.Chat.ID, "Hello!"); err != nil {
-				return err
+			if !chat.IsTicking {
+				chat.IsTicking = true
+				go func() {
+					s.sendMessage(ctx, chat.Id, "Ticker has started!")
+					ticker := time.NewTicker(2 * time.Second)
+					for {
+						select {
+						case <-ticker.C:
+							s.sendMessage(ctx, chat.Id, "tick")
+						case <-chat.StopTicking:
+							return
+						}
+					}
+				}()
 			}
-		case "/help":
-			if err = s.sendMessage(ctx, message.Chat.ID, "Here is your help"); err != nil {
-				return err
+		case "/stop":
+			if chat.IsTicking {
+				chat.IsTicking = false
+				chat.StopTicking <- true
+				s.sendMessage(ctx, chat.Id, "Ticker has stopped!")
 			}
 		default:
-			if err = s.sendMessage(ctx, message.Chat.ID, "Unknown command"); err != nil {
-				return err
-			}
+			s.sendMessage(ctx, chat.Id, "Unknown command")
 		}
 	} else {
-		if err = s.sendMessage(ctx, message.Chat.ID, message.Text); err != nil {
-			return err
-		}
+		s.sendMessage(ctx, chat.Id, message.Text)
 	}
-
-	return nil
-
 }
 
-func (s *TgService) sendMessage(ctx context.Context, chatId int, text string) error {
+func (s *TgService) handleChat(chatId int) *entities.TgChat {
+	chat, ok := s.chats[chatId]
+	if !ok {
+		chat = &entities.TgChat{Id: chatId, StopTicking: make(chan bool)}
+		s.chats[chatId] = chat
+	}
+	return chat
+}
+
+func (s *TgService) sendMessage(ctx context.Context, chatId int, text string) {
 
 	query := url.Values{
 		"chat_id": []string{strconv.Itoa(chatId)},
@@ -130,10 +146,8 @@ func (s *TgService) sendMessage(ctx context.Context, chatId int, text string) er
 	}
 
 	if _, err := s.doRequest(ctx, methodSendMessage, query); err != nil {
-		return e.WrapIfErr("couldn't send message", err)
+		log.Println("couldn't send message", err)
 	}
-
-	return nil
 }
 
 func (s *TgService) doRequest(ctx context.Context, method string, query url.Values) (data []byte, err error) {

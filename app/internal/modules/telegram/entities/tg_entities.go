@@ -7,12 +7,12 @@ type UpdatesResponse struct {
 }
 
 type Update struct {
-	ID      int              `json:"update_id"`
-	Message *IncomingMessage `json:"message"` // Optional. New incoming message of any kind - text, photo, sticker, etc.
+	ID      int      `json:"update_id"`
+	Message *Message `json:"message"` // Optional. New incoming message of any kind - text, photo, sticker, etc.
 	// at most one of the optional parameters can be present in any given update
 }
 
-type IncomingMessage struct {
+type Message struct {
 	Text string `json:"text"`
 	From User   `json:"from"`
 	Chat Chat   `json:"chat"`
