@@ -4,6 +4,7 @@ import (
 	"app/internal/lib/e"
 	"app/internal/modules/hh"
 	"app/internal/modules/tg"
+	"app/internal/storage"
 	"github.com/joho/godotenv"
 	"log"
 	"os"
@@ -21,6 +22,7 @@ type Config struct {
 type App struct {
 	config     Config
 	signalChan chan os.Signal
+	storage    storage.Storage
 	hhClient   hh.HeadHunterer
 	tgClient   tg.Telegramer
 }
@@ -90,7 +92,8 @@ func (a *App) init() error {
 	}
 
 	a.hhClient = hh.NewHhClient(a.config.hhHost)
-	a.tgClient = tg.NewTgClient(a.config.tgHost, a.config.tgApiToken, 100, 0, a.hhClient)
+	a.storage = storage.NewQueriesStorage("storage")
+	a.tgClient = tg.NewTgClient(a.config.tgHost, a.config.tgApiToken, 100, 0, a.hhClient, a.storage)
 
 	a.signalChan = make(chan os.Signal, 1)
 	signal.Notify(a.signalChan, syscall.SIGINT, syscall.SIGTERM)

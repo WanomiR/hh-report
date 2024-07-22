@@ -1,8 +1,11 @@
 package tg
 
 import (
+	"app/internal/lib/e"
+	"app/internal/storage"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 )
@@ -12,11 +15,27 @@ type Worker struct {
 	StopWorking chan bool
 	ChatId      int
 	queries     []Query
+	storage     storage.Storage
 }
 
-func (w *Worker) HandleAddQuery(query string) error {
+func (w *Worker) HandleAddQuery(query string) (err error) {
+	defer func() { err = e.WrapIfErr("couldn't handle query", err) }()
+
 	area, role, text, experience, err := w.ParseAddQuery(query)
 	if err != nil {
+		return err
+	}
+
+	file := storage.NewFile(w.ChatId, fmt.Sprintf("%s %s %s %s", area, role, text, experience))
+	exists, err := w.storage.IsExist(file)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return errors.New("query already exists")
+	}
+
+	if err = w.storage.Save(file); err != nil {
 		return err
 	}
 
@@ -54,6 +73,8 @@ func (w *Worker) AppendAddQuery(area, role, text, experience string) {
 }
 
 func (w *Worker) RemoveQuery(regexMatch string) (err error) {
+	defer func() { err = e.WrapIfErr("couldn't remove query", err) }()
+
 	queryId := strings.Split(regexMatch, " ")[1]
 	id, err := strconv.Atoi(queryId)
 	if err != nil {
@@ -68,16 +89,44 @@ func (w *Worker) RemoveQuery(regexMatch string) (err error) {
 		return errors.New("index out of range")
 	}
 
+	q := w.queries[id]
+	file := storage.NewFile(w.ChatId, fmt.Sprintf("%s %s %s %s", q.Area, q.Role, q.Text, q.Experience))
+
+	if err = w.storage.Remove(file); err != nil {
+		return err
+	}
+
 	w.queries = append(w.queries[:id], w.queries[id+1:]...)
+	log.Println("query removed:", file.Query)
 
 	return nil
+}
+
+func (w *Worker) InitQueries() {
+	files, err := w.storage.ReadAll(w.ChatId)
+	if err != nil {
+		log.Println(e.WrapIfErr("couldn't read queries for chat "+strconv.Itoa(w.ChatId), err).Error())
+	}
+
+	for _, file := range files {
+		parts := strings.Split(file.Query, " ")
+		if len(parts) != 4 {
+			log.Println("expected 4 parts, got", file.Query)
+			continue
+		}
+
+		query := Query{Area: parts[0], Role: parts[1], Text: parts[2], Experience: parts[3]}
+		w.queries = append(w.queries, query)
+	}
+
+	log.Println("read", len(w.queries), "queries for chat", w.ChatId)
 }
 
 func (w *Worker) ListQueries() (queries []string) {
 	queries = make([]string, 0, len(w.queries))
 
 	for i, q := range w.queries {
-		queryText := fmt.Sprintf("%d. Area: %s, role: %s, text: %s, experience: %s;", i+1, q.Area, q.ProfessionalRole, q.Text, q.Experience)
+		queryText := fmt.Sprintf("%d – area: <i>%s</i>, role: <i>%s</i>, text: <i>%s</i>, experience: <i>%s</i>;", i+1, q.Area, q.Role, q.Text, q.Experience)
 		queries = append(queries, queryText)
 	}
 

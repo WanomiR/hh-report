@@ -30,8 +30,8 @@ type Chat struct {
 }
 
 type Query struct {
-	Area             string
-	ProfessionalRole string
-	Text             string
-	Experience       string
+	Area       string
+	Role       string
+	Text       string
+	Experience string
 }

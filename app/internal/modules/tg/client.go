@@ -3,6 +3,7 @@ package tg
 import (
 	"app/internal/lib/e"
 	"app/internal/modules/hh"
+	"app/internal/storage"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -35,11 +36,12 @@ type Client struct {
 	limit    int
 	timeout  int
 	workers  map[int]*Worker
+	storage  storage.Storage
 	reAdd    *regexp.Regexp
 	reRemove *regexp.Regexp
 }
 
-func NewTgClient(host string, token string, batchSize, timeout int, hhClient hh.HeadHunterer) *Client {
+func NewTgClient(host string, token string, batchSize, timeout int, hhClient hh.HeadHunterer, storage storage.Storage) *Client {
 	return &Client{
 		host:     host,          // api.tg.org
 		basePath: "bot" + token, // app<token>
@@ -49,6 +51,7 @@ func NewTgClient(host string, token string, batchSize, timeout int, hhClient hh.
 		limit:    batchSize,
 		timeout:  timeout,
 		workers:  make(map[int]*Worker),
+		storage:  storage,
 		reAdd:    regexp.MustCompile(`add: \d+ \d+ \w+ (-|0|1-3|3-6|6)`),
 		reRemove: regexp.MustCompile(`remove: \d+`),
 	}
@@ -139,7 +142,9 @@ func (c *Client) handleWorker(chatId int) *Worker {
 			ChatId:      chatId,
 			StopWorking: make(chan bool),
 			queries:     make([]Query, 0),
+			storage:     c.storage,
 		}
+		worker.InitQueries()
 		c.workers[chatId] = worker
 	}
 	return worker
