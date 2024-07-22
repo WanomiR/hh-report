@@ -7,8 +7,8 @@ const messageHelp = "This bot helps you to find new vacancies on hh.ru based on 
 	messageAddQuery + "\n\n" + messageRemoveQuery
 
 const messageAddQuery = `To add a new query, send a message to the bot in the following format: 
-<code>add: [area: int] [role_id: int] [keyword: string] [experience: (-|0|1-3|3-6|6)]</code>
-Example: "add: 1 96 golang 1-3"`
+<code>add: [area: int] [role_id: int] [keywords: string] [experience: (-|0|1-3|3-6|6)]</code>
+Example: <code>add: 1 96 golang-разработчик 1-3</code>`
 
 const messageRemoveQuery = `To delete one of the Queries, send the following:
 <code>remove: [query_id: int]</code>`

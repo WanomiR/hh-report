@@ -8,10 +8,12 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
+	"time"
 )
 
 type HeadHunterer interface {
-	GetVacancies(area, role, text, experience string) ([]Vacancy, error)
+	GetVacancies(area, role, text, experience string, period int) ([]Vacancy, error)
 }
 
 type Client struct {
@@ -26,15 +28,21 @@ func NewHhClient(host string) *Client {
 	}
 }
 
-func (c *Client) GetVacancies(area, role, text, experience string) (vacancies []Vacancy, err error) {
+func (c *Client) GetVacancies(area, role, text, experience string, period int) (vacancies []Vacancy, err error) {
 	defer func() { err = e.WrapIfErr("couldn't get vacancies", err) }()
+
+	dateFrom := time.Now().AddDate(0, 0, -period).Format("2006-01-02")
 
 	query := url.Values{
 		"area":              []string{area},
-		"experience":        []string{experience},
 		"text":              []string{text},
 		"professional_role": []string{role},
-		"period":            []string{"3"},
+		"date_from":         []string{dateFrom},
+	}
+
+	if experience != "" {
+		experience = strings.Replace(experience, "-", " ", -1)
+		query["experience"] = []string{experience}
 	}
 
 	data, err := c.doRequest("vacancies", query)

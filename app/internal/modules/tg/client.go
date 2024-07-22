@@ -23,7 +23,7 @@ const (
 	methodSendMessage = "SendMessage" // Use this method to send text messages. On success, the sent Message is returned
 )
 
-const workingInterval = time.Second * 2
+const workingInterval = time.Minute * 15
 
 type Telegramer interface {
 	GetUpdates() ([]Update, error)
@@ -56,7 +56,7 @@ func NewTgClient(host string, token string, batchSize, timeout int, hhClient hh.
 		timeout:  timeout,
 		workers:  make(map[int]*Worker),
 		storage:  storage,
-		reAdd:    regexp.MustCompile(`add: \d+ \d+ \w+ (-|0|1-3|3-6|6)`),
+		reAdd:    regexp.MustCompile(`add: \d+ \d+ [a-zA-Zа-яА-Я-]+ (-|0|1-3|3-6|6)`),
 		reRemove: regexp.MustCompile(`remove: \d+`),
 	}
 }
@@ -153,13 +153,10 @@ func (c *Client) processCommand(command string, worker *Worker) {
 	switch command {
 
 	case "/check":
-		data, err := c.hhClient.GetVacancies("1", "96", "golang", "noExperience")
-		if err != nil {
-			log.Println(err)
-		} else {
-			log.Println("vacancies found:", len(data))
+		for _, q := range worker.Queries {
+			worker.DoSearch(q)
 		}
-		c.SendMessage(worker.ChatId, "checked")
+		c.SendMessage(worker.ChatId, fmt.Sprintf("Checked %d queries 👌🏻", len(worker.Queries)))
 
 	case "/start":
 		if len(worker.Queries) == 0 {
@@ -185,11 +182,16 @@ func (c *Client) processCommand(command string, worker *Worker) {
 				c.SendMessage(worker.ChatId, query)
 			}
 		} else {
-			c.SendMessage(worker.ChatId, "No active queries")
+			c.SendMessage(worker.ChatId, messageNoQueries)
 		}
 
 	case "/status":
-		// TODO: show the number of active workers in this chat
+		if worker.IsWorking {
+			msg := fmt.Sprintf("Working on %d queries with interval %v", len(worker.Queries), worker.workingInterval)
+			c.SendMessage(worker.ChatId, msg)
+		} else {
+			c.SendMessage(worker.ChatId, "Worker not started.")
+		}
 
 	default:
 		c.SendMessage(worker.ChatId, "Unknown command")

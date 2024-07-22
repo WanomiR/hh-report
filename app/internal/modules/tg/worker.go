@@ -18,6 +18,7 @@ type Worker struct {
 	StopWorking     chan bool
 	Queries         []Query
 	storage         storage.Storage
+	vacancies       map[string]time.Time
 	workingInterval time.Duration
 	tgClient        Telegramer
 	hhClient        hh.HeadHunterer
@@ -28,6 +29,7 @@ func NewWorker(chatId int, interval time.Duration, store storage.Storage, tgClie
 		ChatId:          chatId,
 		StopWorking:     make(chan bool),
 		Queries:         make([]Query, 0),
+		vacancies:       make(map[string]time.Time),
 		storage:         store,
 		workingInterval: interval,
 		tgClient:        tgClient,
@@ -39,15 +41,47 @@ func NewWorker(chatId int, interval time.Duration, store storage.Storage, tgClie
 
 func (w *Worker) Work() {
 	w.IsWorking = true
-	ticker := time.NewTicker(w.workingInterval)
+
+	workTicker := time.NewTicker(w.workingInterval)
+	cleanTicker := time.NewTicker(time.Hour * 24)
 
 	for {
 		select {
-		case <-ticker.C:
-			w.tgClient.SendMessage(w.ChatId, "tick")
+		case <-workTicker.C:
+			for _, query := range w.Queries {
+				go w.DoSearch(query)
+			}
+		case <-cleanTicker.C:
+			go w.CleanVacancies()
+
 		case <-w.StopWorking:
 			w.IsWorking = false
 			return
+		}
+	}
+}
+
+func (w *Worker) DoSearch(q Query) {
+	vacancies, err := w.hhClient.GetVacancies(q.Area, q.Role, q.Text, q.Experience, 1)
+	if err != nil {
+		log.Println(e.WrapIfErr(fmt.Sprintf("error getting vacancies for chat %d", w.ChatId), err).Error())
+	}
+
+	for _, v := range vacancies {
+		if _, ok := w.vacancies[v.ID]; !ok {
+			msg := fmt.Sprintf("Found new vacancy for <i>%s</i> with eperience <i>%s</i>:\nhttps://hh.ru/vacancy/%s", q.Text, q.Experience, v.ID)
+			w.tgClient.SendMessage(w.ChatId, msg)
+			w.vacancies[v.ID] = time.Now()
+		}
+	}
+	log.Printf("conducted search: found %d vacancies for %s with experience %s\n", len(vacancies), q.Text, q.Experience)
+}
+
+func (w *Worker) CleanVacancies() {
+	for id, createdAt := range w.vacancies {
+		if createdAt.Before(time.Now().Add(-time.Hour * 72)) {
+			delete(w.vacancies, id)
+			log.Printf("deleted vacancy %s for chat %d\n", id, w.ChatId)
 		}
 	}
 }
@@ -80,7 +114,7 @@ func (w *Worker) HandleAddQuery(query string) (err error) {
 func (w *Worker) ParseAddQuery(regexMatch string) (area string, role string, text string, exp string, err error) {
 	parts := strings.Split(regexMatch, " ")
 	if len(parts) != 5 {
-		return "", "", "", "", errors.New(fmt.Sprintf("should be exactly 4 parts, got: %d", len(parts)))
+		return "", "", "", "", errors.New(fmt.Sprintf("should be exactly 5 parts, got: %d", len(parts)))
 	}
 
 	area, role, text, exp = parts[1], parts[2], parts[3], parts[4]
