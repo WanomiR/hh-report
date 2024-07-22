@@ -48,8 +48,11 @@ func (w *Worker) Work() {
 	for {
 		select {
 		case <-workTicker.C:
-			for _, query := range w.Queries {
-				go w.DoSearch(query)
+			currHour := time.Now().Hour()
+			if currHour > 7 && currHour < 21 {
+				for _, query := range w.Queries {
+					go w.DoSearch(query)
+				}
 			}
 		case <-cleanTicker.C:
 			go w.CleanVacancies()

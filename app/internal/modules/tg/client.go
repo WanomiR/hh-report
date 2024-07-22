@@ -23,7 +23,7 @@ const (
 	methodSendMessage = "SendMessage" // Use this method to send text messages. On success, the sent Message is returned
 )
 
-const workingInterval = time.Minute * 15
+const workingInterval = time.Minute * 5
 
 type Telegramer interface {
 	GetUpdates() ([]Update, error)
