@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -73,8 +72,6 @@ func (c *Client) doRequest(method string, query url.Values) (data []byte, err er
 	}
 
 	req.URL.RawQuery = query.Encode()
-
-	log.Println(req.URL.String())
 
 	resp, err := c.client.Do(req)
 	if err != nil {
