@@ -15,16 +15,20 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
 	methodGetUpdates  = "getUpdates"  // Use this method to receive incoming updates using long polling. Returns an Array of Update objects
-	methodSendMessage = "sendMessage" // Use this method to send text messages. On success, the sent Message is returned
+	methodSendMessage = "SendMessage" // Use this method to send text messages. On success, the sent Message is returned
 )
+
+const workingInterval = time.Second * 2
 
 type Telegramer interface {
 	GetUpdates() ([]Update, error)
 	ProcessUpdates(updates []Update)
+	SendMessage(chatId int, text string)
 }
 
 type Client struct {
@@ -115,37 +119,32 @@ func (c *Client) processMessage(message *Message) {
 		match := c.reAdd.FindStringSubmatch(message.Text)[0]
 		// handle possible error
 		if err := worker.HandleAddQuery(match); err != nil {
-			c.sendMessage(worker.ChatId, e.WrapIfErr("error adding query", err).Error())
+			c.SendMessage(worker.ChatId, e.WrapIfErr("error adding query", err).Error())
 		} else {
-			c.sendMessage(worker.ChatId, "Query added 👌🏻")
+			c.SendMessage(worker.ChatId, "Query added 👌🏻")
 		}
 
 	case c.reRemove.MatchString(message.Text):
 		match := c.reRemove.FindStringSubmatch(message.Text)[0]
 		// handle possible error
 		if err := worker.RemoveQuery(match); err != nil {
-			c.sendMessage(worker.ChatId, e.WrapIfErr("error removing query", err).Error())
+			c.SendMessage(worker.ChatId, e.WrapIfErr("error removing query", err).Error())
 		} else {
-			c.sendMessage(worker.ChatId, "Query removed 🗑️")
+			c.SendMessage(worker.ChatId, "Query removed 🗑️")
 		}
 
 	default:
 		// just mirror for now
-		c.sendMessage(worker.ChatId, message.Text)
+		c.SendMessage(worker.ChatId, message.Text)
 	}
 }
 
 func (c *Client) handleWorker(chatId int) *Worker {
 	worker, ok := c.workers[chatId]
 	if !ok {
-		worker = &Worker{
-			ChatId:      chatId,
-			StopWorking: make(chan bool),
-			queries:     make([]Query, 0),
-			storage:     c.storage,
-		}
-		worker.InitQueries()
+		worker = NewWorker(chatId, workingInterval, c.storage, c, c.hhClient)
 		c.workers[chatId] = worker
+		log.Println("new worker created:", chatId)
 	}
 	return worker
 }
@@ -160,38 +159,44 @@ func (c *Client) processCommand(command string, worker *Worker) {
 		} else {
 			log.Println("vacancies found:", len(data))
 		}
-		c.sendMessage(worker.ChatId, "checked")
+		c.SendMessage(worker.ChatId, "checked")
 
 	case "/start":
-		// TODO:
-		//  - show help if there are no queries
-		//  - otherwise launch workers on current queries
+		if len(worker.Queries) == 0 {
+			c.SendMessage(worker.ChatId, messageNoQueries+"\n\n"+messageAddQuery)
+		} else if !worker.IsWorking {
+			go worker.Work()
+			c.SendMessage(worker.ChatId, "Worker started!")
+		}
+
+	case "/stop":
+		if worker.IsWorking {
+			worker.StopWorking <- true
+			c.SendMessage(worker.ChatId, "Worker stopped.")
+		}
 
 	case "/help":
-		c.sendMessage(worker.ChatId, messageHelp)
+		c.SendMessage(worker.ChatId, messageHelp)
 
 	case "/queries":
 		if queries := worker.ListQueries(); len(queries) > 0 {
-			c.sendMessage(worker.ChatId, "Active queries:")
+			c.SendMessage(worker.ChatId, "Active queries:")
 			for _, query := range worker.ListQueries() {
-				c.sendMessage(worker.ChatId, query)
+				c.SendMessage(worker.ChatId, query)
 			}
 		} else {
-			c.sendMessage(worker.ChatId, "No active queries")
+			c.SendMessage(worker.ChatId, "No active queries")
 		}
 
 	case "/status":
 		// TODO: show the number of active workers in this chat
 
-	case "/stop":
-		// TODO: stop all workers
-
 	default:
-		c.sendMessage(worker.ChatId, "Unknown command")
+		c.SendMessage(worker.ChatId, "Unknown command")
 	}
 }
 
-func (c *Client) sendMessage(chatId int, text string) {
+func (c *Client) SendMessage(chatId int, text string) {
 
 	query := url.Values{
 		"chat_id":    []string{strconv.Itoa(chatId)},

@@ -2,20 +2,54 @@ package tg
 
 import (
 	"app/internal/lib/e"
+	"app/internal/modules/hh"
 	"app/internal/storage"
 	"errors"
 	"fmt"
 	"log"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Worker struct {
-	IsWorking   bool
-	StopWorking chan bool
-	ChatId      int
-	queries     []Query
-	storage     storage.Storage
+	ChatId          int
+	IsWorking       bool
+	StopWorking     chan bool
+	Queries         []Query
+	storage         storage.Storage
+	workingInterval time.Duration
+	tgClient        Telegramer
+	hhClient        hh.HeadHunterer
+}
+
+func NewWorker(chatId int, interval time.Duration, store storage.Storage, tgClient Telegramer, hhClient hh.HeadHunterer) *Worker {
+	w := &Worker{
+		ChatId:          chatId,
+		StopWorking:     make(chan bool),
+		Queries:         make([]Query, 0),
+		storage:         store,
+		workingInterval: interval,
+		tgClient:        tgClient,
+		hhClient:        hhClient,
+	}
+	w.InitQueries()
+	return w
+}
+
+func (w *Worker) Work() {
+	w.IsWorking = true
+	ticker := time.NewTicker(w.workingInterval)
+
+	for {
+		select {
+		case <-ticker.C:
+			w.tgClient.SendMessage(w.ChatId, "tick")
+		case <-w.StopWorking:
+			w.IsWorking = false
+			return
+		}
+	}
 }
 
 func (w *Worker) HandleAddQuery(query string) (err error) {
@@ -69,7 +103,7 @@ func (w *Worker) ParseAddQuery(regexMatch string) (area string, role string, tex
 
 func (w *Worker) AppendAddQuery(area, role, text, experience string) {
 	q := Query{area, role, text, experience}
-	w.queries = append(w.queries, q)
+	w.Queries = append(w.Queries, q)
 }
 
 func (w *Worker) RemoveQuery(regexMatch string) (err error) {
@@ -83,20 +117,20 @@ func (w *Worker) RemoveQuery(regexMatch string) (err error) {
 
 	id -= 1
 
-	if len(w.queries) == 0 {
+	if len(w.Queries) == 0 {
 		return errors.New("queries list is empty")
-	} else if id < 0 || id >= len(w.queries) {
+	} else if id < 0 || id >= len(w.Queries) {
 		return errors.New("index out of range")
 	}
 
-	q := w.queries[id]
+	q := w.Queries[id]
 	file := storage.NewFile(w.ChatId, fmt.Sprintf("%s %s %s %s", q.Area, q.Role, q.Text, q.Experience))
 
 	if err = w.storage.Remove(file); err != nil {
 		return err
 	}
 
-	w.queries = append(w.queries[:id], w.queries[id+1:]...)
+	w.Queries = append(w.Queries[:id], w.Queries[id+1:]...)
 	log.Println("query removed:", file.Query)
 
 	return nil
@@ -116,16 +150,16 @@ func (w *Worker) InitQueries() {
 		}
 
 		query := Query{Area: parts[0], Role: parts[1], Text: parts[2], Experience: parts[3]}
-		w.queries = append(w.queries, query)
+		w.Queries = append(w.Queries, query)
 	}
 
-	log.Println("read", len(w.queries), "queries for chat", w.ChatId)
+	log.Println("read", len(w.Queries), "queries for chat", w.ChatId)
 }
 
 func (w *Worker) ListQueries() (queries []string) {
-	queries = make([]string, 0, len(w.queries))
+	queries = make([]string, 0, len(w.Queries))
 
-	for i, q := range w.queries {
+	for i, q := range w.Queries {
 		queryText := fmt.Sprintf("%d – area: <i>%s</i>, role: <i>%s</i>, text: <i>%s</i>, experience: <i>%s</i>;", i+1, q.Area, q.Role, q.Text, q.Experience)
 		queries = append(queries, queryText)
 	}
