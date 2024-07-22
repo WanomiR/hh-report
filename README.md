@@ -1,8 +1,2 @@
-# hh-report
-New vacancies report and job market analysis.
-
-# TODO:
-- [x] Create project structure 
-- [x] Create "Hello world" bot that sends messages every $N$ minutes
-- [x] Get rid of contoller/service structure for telegram module, keep only client/events separation
-- [ ] Introduce hh module with authorization
+# hh report
+Sends notifications about new vacancies based on multiple search parameters.
