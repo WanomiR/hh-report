@@ -16,15 +16,21 @@ import (
 
 type Worker interface {
 	Work()
-	DoSearch(query Query)
+	DoSearch(Query)
+	HandleAddQuery(string) error
+	RemoveQuery(string) error
+	Queries() []Query
+	ChatId() int
+	IsWorking() bool
+	StopWorking()
 }
 
 type WorkingAgent struct {
-	ChatId          int
-	IsWorking       bool
-	StopWorking     chan bool
-	WorkingInterval time.Duration
-	Queries         []Query
+	chatId          int
+	isWorking       bool
+	stopWorking     chan bool
+	workingInterval time.Duration
+	queries         []Query
 	vacancies       map[string]time.Time
 	mux             *sync.RWMutex
 	storage         storage.Storage
@@ -34,10 +40,10 @@ type WorkingAgent struct {
 
 func NewWorkingAgent(chatId int, interval time.Duration, store storage.Storage, tgClient tg.Telegramer, hhClient hh.HeadHunterer) *WorkingAgent {
 	w := &WorkingAgent{
-		ChatId:          chatId,
-		StopWorking:     make(chan bool),
-		WorkingInterval: interval,
-		Queries:         make([]Query, 0),
+		chatId:          chatId,
+		stopWorking:     make(chan bool),
+		workingInterval: interval,
+		queries:         make([]Query, 0),
 		vacancies:       make(map[string]time.Time),
 		mux:             new(sync.RWMutex),
 		storage:         store,
@@ -49,9 +55,9 @@ func NewWorkingAgent(chatId int, interval time.Duration, store storage.Storage, 
 }
 
 func (w *WorkingAgent) Work() {
-	w.IsWorking = true
+	w.isWorking = true
 
-	workTicker := time.NewTicker(w.WorkingInterval)
+	workTicker := time.NewTicker(w.workingInterval)
 	cleanTicker := time.NewTicker(time.Hour * 24)
 
 	for {
@@ -59,15 +65,15 @@ func (w *WorkingAgent) Work() {
 		case <-workTicker.C:
 			currHour := time.Now().Hour()
 			if currHour > 3 && currHour < 19 { // work only during the day, correct for GMT+3
-				for _, query := range w.Queries {
+				for _, query := range w.queries {
 					go w.DoSearch(query)
 				}
 			}
 		case <-cleanTicker.C:
 			go w.cleanVacancies()
 
-		case <-w.StopWorking:
-			w.IsWorking = false
+		case <-w.stopWorking:
+			w.isWorking = false
 			return
 		}
 	}
@@ -76,13 +82,13 @@ func (w *WorkingAgent) Work() {
 func (w *WorkingAgent) DoSearch(q Query) {
 	vacancies, err := w.hhClient.GetVacancies(q.Area, q.Role, q.Text, q.Experience, 1)
 	if err != nil {
-		log.Println(e.WrapIfErr(fmt.Sprintf("error getting vacancies for chat %d", w.ChatId), err).Error())
+		log.Println(e.WrapIfErr(fmt.Sprintf("error getting vacancies for chat %d", w.chatId), err).Error())
 	}
 
 	for _, v := range vacancies {
 		if _, ok := w.vacancies[v.ID]; !ok {
 			msg := fmt.Sprintf("Found new vacancy for <i>%s</i> with eperience <i>%s</i>:\nhttps://hh.ru/vacancy/%s", q.Text, q.Experience, v.ID)
-			w.tgClient.SendMessage(w.ChatId, msg)
+			w.tgClient.SendMessage(w.chatId, msg)
 
 			w.mux.Lock()
 			w.vacancies[v.ID] = time.Now()
@@ -100,7 +106,7 @@ func (w *WorkingAgent) HandleAddQuery(query string) (err error) {
 		return err
 	}
 
-	file := storage.NewFile(w.ChatId, fmt.Sprintf("%s %s %s %s", area, role, text, experience))
+	file := storage.NewFile(w.chatId, fmt.Sprintf("%s %s %s %s", area, role, text, experience))
 	exists, err := w.storage.IsExist(file)
 	if err != nil {
 		return err
@@ -128,34 +134,39 @@ func (w *WorkingAgent) RemoveQuery(regexMatch string) (err error) {
 
 	id -= 1
 
-	if len(w.Queries) == 0 {
+	if len(w.queries) == 0 {
 		return errors.New("queries list is empty")
-	} else if id < 0 || id >= len(w.Queries) {
+	} else if id < 0 || id >= len(w.queries) {
 		return errors.New("index out of range")
 	}
 
-	q := w.Queries[id]
-	file := storage.NewFile(w.ChatId, fmt.Sprintf("%s %s %s %s", q.Area, q.Role, q.Text, q.Experience))
+	q := w.queries[id]
+	file := storage.NewFile(w.chatId, fmt.Sprintf("%s %s %s %s", q.Area, q.Role, q.Text, q.Experience))
 
 	if err = w.storage.Remove(file); err != nil {
 		return err
 	}
 
-	w.Queries = append(w.Queries[:id], w.Queries[id+1:]...)
+	w.queries = append(w.queries[:id], w.queries[id+1:]...)
 	log.Println("query removed:", file.Query)
 
 	return nil
 }
 
-func (w *WorkingAgent) ListQueries() (queries []string) {
-	queries = make([]string, 0, len(w.Queries))
+func (w *WorkingAgent) Queries() []Query {
+	return w.queries
+}
 
-	for i, q := range w.Queries {
-		queryText := fmt.Sprintf("%d – area: <i>%s</i>, role: <i>%s</i>, text: <i>%s</i>, experience: <i>%s</i>;", i+1, q.Area, q.Role, q.Text, q.Experience)
-		queries = append(queries, queryText)
-	}
+func (w *WorkingAgent) ChatId() int {
+	return w.chatId
+}
 
-	return queries
+func (w *WorkingAgent) IsWorking() bool {
+	return w.isWorking
+}
+
+func (w *WorkingAgent) StopWorking() {
+	w.stopWorking <- true
 }
 
 func (w *WorkingAgent) parseAddQuery(regexMatch string) (area string, role string, text string, exp string, err error) {
@@ -184,7 +195,7 @@ func (w *WorkingAgent) parseAddQuery(regexMatch string) (area string, role strin
 
 func (w *WorkingAgent) appendAddQuery(area, role, text, experience string) {
 	q := Query{Area: area, Role: role, Text: text, Experience: experience}
-	w.Queries = append(w.Queries, q)
+	w.queries = append(w.queries, q)
 }
 
 func (w *WorkingAgent) cleanVacancies() {
@@ -195,15 +206,15 @@ func (w *WorkingAgent) cleanVacancies() {
 			delete(w.vacancies, id)
 			w.mux.RUnlock()
 
-			log.Printf("deleted vacancy %s for chat %d\n", id, w.ChatId)
+			log.Printf("deleted vacancy %s for chat %d\n", id, w.chatId)
 		}
 	}
 }
 
 func (w *WorkingAgent) initQueries() {
-	files, err := w.storage.ReadAll(w.ChatId)
+	files, err := w.storage.ReadAll(w.chatId)
 	if err != nil {
-		log.Println(e.WrapIfErr("couldn't read Queries for chat "+strconv.Itoa(w.ChatId), err).Error())
+		log.Println(e.WrapIfErr("couldn't read queries for chat "+strconv.Itoa(w.chatId), err).Error())
 	}
 
 	for _, file := range files {
@@ -214,8 +225,8 @@ func (w *WorkingAgent) initQueries() {
 		}
 
 		query := Query{Area: parts[0], Role: parts[1], Text: parts[2], Experience: parts[3]}
-		w.Queries = append(w.Queries, query)
+		w.queries = append(w.queries, query)
 	}
 
-	log.Println("read", len(w.Queries), "Queries for chat", w.ChatId)
+	log.Println("read", len(w.queries), "queries for chat", w.chatId)
 }

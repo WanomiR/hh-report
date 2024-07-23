@@ -36,27 +36,35 @@ type Client struct {
 	host     string
 	basePath string
 	tgClient *http.Client
-	hhClient hh.HeadHunterer
 	offset   int
 	limit    int
 	timeout  int
-	workers  map[int]*wr.WorkingAgent
+
+	hhClient hh.HeadHunterer
+
+	workers  map[int]wr.Worker
+	interval time.Duration
 	storage  storage.Storage
+
 	reAdd    *regexp.Regexp
 	reRemove *regexp.Regexp
 }
 
-func NewTgClient(host string, token string, batchSize, timeout int, hhClient hh.HeadHunterer, storage storage.Storage) *Client {
+func NewTgClient(host string, token string, batchSize, timeout int, hhClient hh.HeadHunterer, storage storage.Storage, workingInterval time.Duration) *Client {
 	return &Client{
 		host:     host,          // api.tg.org
 		basePath: "bot" + token, // app<token>
 		tgClient: new(http.Client),
-		hhClient: hhClient,
 		offset:   0,
 		limit:    batchSize,
 		timeout:  timeout,
-		workers:  make(map[int]*wr.WorkingAgent),
+
+		hhClient: hhClient,
+
+		workers:  make(map[int]wr.Worker),
+		interval: workingInterval,
 		storage:  storage,
+
 		reAdd:    regexp.MustCompile(`add: \d+ \d+ [a-zA-Zа-яА-Я-]+ (-|0|1-3|3-6|6)`),
 		reRemove: regexp.MustCompile(`remove: \d+`),
 	}
@@ -109,7 +117,7 @@ func (c *Client) ProcessUpdates(updates []Update) {
 func (c *Client) processMessage(message *Message) {
 	worker := c.handleWorker(message.Chat.ID)
 
-	log.Println("got new message:", message.Text, fmt.Sprintf("📍 [wr id: %d, isWorking: %v]", worker.ChatId, worker.IsWorking))
+	log.Printf("got message << %v >> from %d", message.Text, message.Chat.ID)
 
 	switch {
 	case strings.HasPrefix(message.Text, "/"):
@@ -120,82 +128,83 @@ func (c *Client) processMessage(message *Message) {
 		match := c.reAdd.FindStringSubmatch(message.Text)[0]
 		// handle possible error
 		if err := worker.HandleAddQuery(match); err != nil {
-			c.SendMessage(worker.ChatId, e.WrapIfErr("error adding query", err).Error())
+			c.SendMessage(worker.ChatId(), e.WrapIfErr("error adding query", err).Error())
 		} else {
-			c.SendMessage(worker.ChatId, "Query added 👌🏻")
+			c.SendMessage(worker.ChatId(), "Query added 👌🏻")
 		}
 
 	case c.reRemove.MatchString(message.Text):
 		match := c.reRemove.FindStringSubmatch(message.Text)[0]
 		// handle possible error
 		if err := worker.RemoveQuery(match); err != nil {
-			c.SendMessage(worker.ChatId, e.WrapIfErr("error removing query", err).Error())
+			c.SendMessage(worker.ChatId(), e.WrapIfErr("error removing query", err).Error())
 		} else {
-			c.SendMessage(worker.ChatId, "Query removed 🗑️")
+			c.SendMessage(worker.ChatId(), "Query removed 🗑️")
 		}
 
 	default:
 		// just mirror for now
-		c.SendMessage(worker.ChatId, message.Text)
+		c.SendMessage(worker.ChatId(), message.Text)
 	}
 }
 
-func (c *Client) handleWorker(chatId int) *wr.WorkingAgent {
+func (c *Client) handleWorker(chatId int) wr.Worker {
 	worker, ok := c.workers[chatId]
 	if !ok {
-		worker = wr.NewWorkingAgent(chatId, workingInterval, c.storage, c, c.hhClient)
+		worker = wr.NewWorkingAgent(chatId, c.interval, c.storage, c, c.hhClient)
 		c.workers[chatId] = worker
-		log.Println("new wr created:", chatId)
+		log.Println("new worker created:", chatId)
 	}
 	return worker
 }
 
-func (c *Client) processCommand(command string, worker *wr.WorkingAgent) {
+func (c *Client) processCommand(command string, worker wr.Worker) {
 	switch command {
 
 	case "/check":
-		for _, q := range worker.Queries {
+		for _, q := range worker.Queries() {
 			worker.DoSearch(q)
 		}
-		c.SendMessage(worker.ChatId, fmt.Sprintf("Checked %d queries 👌🏻", len(worker.Queries)))
+		c.SendMessage(worker.ChatId(), fmt.Sprintf("Checked %d queries 👌🏻", len(worker.Queries())))
 
 	case "/start":
-		if len(worker.Queries) == 0 {
-			c.SendMessage(worker.ChatId, messageNoQueries+"\n\n"+messageAddQuery)
-		} else if !worker.IsWorking {
+		if len(worker.Queries()) == 0 {
+			c.SendMessage(worker.ChatId(), messageNoQueries+"\n\n"+messageAddQuery)
+		} else if !worker.IsWorking() {
 			go worker.Work()
-			c.SendMessage(worker.ChatId, "WorkingAgent started!")
+			c.SendMessage(worker.ChatId(), "Worker started!")
 		}
 
 	case "/stop":
-		if worker.IsWorking {
-			worker.StopWorking <- true
-			c.SendMessage(worker.ChatId, "WorkingAgent stopped.")
+		if worker.IsWorking() {
+			worker.StopWorking()
+			c.SendMessage(worker.ChatId(), "Worker stopped.")
 		}
 
 	case "/help":
-		c.SendMessage(worker.ChatId, messageHelp)
+		c.SendMessage(worker.ChatId(), messageHelp)
 
 	case "/queries":
-		if queries := worker.ListQueries(); len(queries) > 0 {
-			c.SendMessage(worker.ChatId, "Active queries:")
-			for _, query := range worker.ListQueries() {
-				c.SendMessage(worker.ChatId, query)
+		if queries := worker.Queries(); len(queries) > 0 {
+			c.SendMessage(worker.ChatId(), "Active queries:")
+			for i, q := range queries {
+				msg := fmt.Sprintf("%d – area: <i>%s</i>, role: <i>%s</i>, text: <i>%s</i>, experience: <i>%s</i>;", i+1, q.Area, q.Role, q.Text, q.Experience)
+				c.SendMessage(worker.ChatId(), msg)
 			}
 		} else {
-			c.SendMessage(worker.ChatId, messageNoQueries)
+			c.SendMessage(worker.ChatId(), messageNoQueries)
 		}
 
 	case "/status":
-		if worker.IsWorking {
-			msg := fmt.Sprintf("Working on %d queries with interval %v", len(worker.Queries), worker.WorkingInterval)
-			c.SendMessage(worker.ChatId, msg)
+		if worker.IsWorking() {
+			msg := fmt.Sprintf("Working on %d queries with interval %v", len(worker.Queries()), c.interval)
+			c.SendMessage(worker.ChatId(), msg)
 		} else {
-			c.SendMessage(worker.ChatId, "WorkingAgent not started.")
+			c.SendMessage(worker.ChatId(), "Worker not started.")
 		}
 
 	default:
-		c.SendMessage(worker.ChatId, "Unknown command")
+		c.SendMessage(worker.ChatId(), "Unknown command")
 	}
 }
 
