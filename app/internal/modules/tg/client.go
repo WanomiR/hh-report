@@ -3,6 +3,7 @@ package tg
 import (
 	"app/internal/lib/e"
 	"app/internal/modules/hh"
+	"app/internal/modules/wr"
 	"app/internal/storage"
 	"context"
 	"encoding/json"
@@ -39,7 +40,7 @@ type Client struct {
 	offset   int
 	limit    int
 	timeout  int
-	workers  map[int]*Worker
+	workers  map[int]*wr.WorkingAgent
 	storage  storage.Storage
 	reAdd    *regexp.Regexp
 	reRemove *regexp.Regexp
@@ -54,7 +55,7 @@ func NewTgClient(host string, token string, batchSize, timeout int, hhClient hh.
 		offset:   0,
 		limit:    batchSize,
 		timeout:  timeout,
-		workers:  make(map[int]*Worker),
+		workers:  make(map[int]*wr.WorkingAgent),
 		storage:  storage,
 		reAdd:    regexp.MustCompile(`add: \d+ \d+ [a-zA-Zа-яА-Я-]+ (-|0|1-3|3-6|6)`),
 		reRemove: regexp.MustCompile(`remove: \d+`),
@@ -108,14 +109,14 @@ func (c *Client) ProcessUpdates(updates []Update) {
 func (c *Client) processMessage(message *Message) {
 	worker := c.handleWorker(message.Chat.ID)
 
-	log.Println("got new message:", message.Text, fmt.Sprintf("📍 [worker id: %d, isWorking: %v]", worker.ChatId, worker.IsWorking))
+	log.Println("got new message:", message.Text, fmt.Sprintf("📍 [wr id: %d, isWorking: %v]", worker.ChatId, worker.IsWorking))
 
 	switch {
 	case strings.HasPrefix(message.Text, "/"):
 		c.processCommand(message.Text, worker)
 
 	case c.reAdd.MatchString(message.Text):
-		// adding new query to the worker
+		// adding new query to the wr
 		match := c.reAdd.FindStringSubmatch(message.Text)[0]
 		// handle possible error
 		if err := worker.HandleAddQuery(match); err != nil {
@@ -139,17 +140,17 @@ func (c *Client) processMessage(message *Message) {
 	}
 }
 
-func (c *Client) handleWorker(chatId int) *Worker {
+func (c *Client) handleWorker(chatId int) *wr.WorkingAgent {
 	worker, ok := c.workers[chatId]
 	if !ok {
-		worker = NewWorker(chatId, workingInterval, c.storage, c, c.hhClient)
+		worker = wr.NewWorkingAgent(chatId, workingInterval, c.storage, c, c.hhClient)
 		c.workers[chatId] = worker
-		log.Println("new worker created:", chatId)
+		log.Println("new wr created:", chatId)
 	}
 	return worker
 }
 
-func (c *Client) processCommand(command string, worker *Worker) {
+func (c *Client) processCommand(command string, worker *wr.WorkingAgent) {
 	switch command {
 
 	case "/check":
@@ -163,13 +164,13 @@ func (c *Client) processCommand(command string, worker *Worker) {
 			c.SendMessage(worker.ChatId, messageNoQueries+"\n\n"+messageAddQuery)
 		} else if !worker.IsWorking {
 			go worker.Work()
-			c.SendMessage(worker.ChatId, "Worker started!")
+			c.SendMessage(worker.ChatId, "WorkingAgent started!")
 		}
 
 	case "/stop":
 		if worker.IsWorking {
 			worker.StopWorking <- true
-			c.SendMessage(worker.ChatId, "Worker stopped.")
+			c.SendMessage(worker.ChatId, "WorkingAgent stopped.")
 		}
 
 	case "/help":
@@ -187,10 +188,10 @@ func (c *Client) processCommand(command string, worker *Worker) {
 
 	case "/status":
 		if worker.IsWorking {
-			msg := fmt.Sprintf("Working on %d queries with interval %v", len(worker.Queries), worker.workingInterval)
+			msg := fmt.Sprintf("Working on %d queries with interval %v", len(worker.Queries), worker.WorkingInterval)
 			c.SendMessage(worker.ChatId, msg)
 		} else {
-			c.SendMessage(worker.ChatId, "Worker not started.")
+			c.SendMessage(worker.ChatId, "WorkingAgent not started.")
 		}
 
 	default:
