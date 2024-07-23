@@ -23,6 +23,7 @@ type App struct {
 	config     Config
 	signalChan chan os.Signal
 	storage    storage.Storage
+	wAgent     tg.Worker
 	hhClient   hh.HeadHunterer
 	tgClient   tg.Telegramer
 }
@@ -93,7 +94,9 @@ func (a *App) init() error {
 
 	a.hhClient = hh.NewHhClient(a.config.hhHost)
 	a.storage = storage.NewQueriesStorage("storage")
-	a.tgClient = tg.NewTgClient(a.config.tgHost, a.config.tgApiToken, 100, 0, a.hhClient, a.storage)
+	a.tgClient = tg.NewTgClient(
+		a.config.tgHost, a.config.tgApiToken, 100, 0, a.hhClient, a.storage, time.Minute*10,
+	)
 
 	a.signalChan = make(chan os.Signal, 1)
 	signal.Notify(a.signalChan, syscall.SIGINT, syscall.SIGTERM)

@@ -28,3 +28,10 @@ type Chat struct {
 	ID   int    `json:"id"`
 	Type string `json:"type"`
 }
+
+type Query struct {
+	Area       string
+	Role       string
+	Text       string
+	Experience string
+}

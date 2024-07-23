@@ -3,7 +3,6 @@ package tg
 import (
 	"app/internal/lib/e"
 	"app/internal/modules/hh"
-	"app/internal/modules/wr"
 	"app/internal/storage"
 	"context"
 	"encoding/json"
@@ -18,6 +17,16 @@ import (
 	"strings"
 	"time"
 )
+
+var Reset = "\033[0m"
+var Red = "\033[31m"
+var Green = "\033[32m"
+var Yellow = "\033[33m"
+var Blue = "\033[34m"
+var Magenta = "\033[35m"
+var Cyan = "\033[36m"
+var Gray = "\033[37m"
+var White = "\033[97m"
 
 const (
 	methodGetUpdates  = "getUpdates"  // Use this method to receive incoming updates using long polling. Returns an Array of Update objects
@@ -42,7 +51,7 @@ type Client struct {
 
 	hhClient hh.HeadHunterer
 
-	workers  map[int]wr.Worker
+	workers  map[int]Worker
 	interval time.Duration
 	storage  storage.Storage
 
@@ -61,7 +70,7 @@ func NewTgClient(host string, token string, batchSize, timeout int, hhClient hh.
 
 		hhClient: hhClient,
 
-		workers:  make(map[int]wr.Worker),
+		workers:  make(map[int]Worker),
 		interval: workingInterval,
 		storage:  storage,
 
@@ -117,7 +126,7 @@ func (c *Client) ProcessUpdates(updates []Update) {
 func (c *Client) processMessage(message *Message) {
 	worker := c.handleWorker(message.Chat.ID)
 
-	log.Printf("got message << %v >> from %d", message.Text, message.Chat.ID)
+	log.Printf("got message %s%v%s from %s%d%s", Magenta, message.Text, Reset, Green, message.Chat.ID, Reset)
 
 	switch {
 	case strings.HasPrefix(message.Text, "/"):
@@ -148,17 +157,17 @@ func (c *Client) processMessage(message *Message) {
 	}
 }
 
-func (c *Client) handleWorker(chatId int) wr.Worker {
+func (c *Client) handleWorker(chatId int) Worker {
 	worker, ok := c.workers[chatId]
 	if !ok {
-		worker = wr.NewWorkingAgent(chatId, c.interval, c.storage, c, c.hhClient)
+		worker = NewWorkingAgent(chatId, c.interval, c.storage, c, c.hhClient)
 		c.workers[chatId] = worker
-		log.Println("new worker created:", chatId)
+		log.Printf("new worker created %s%d%s", Green, chatId, Reset)
 	}
 	return worker
 }
 
-func (c *Client) processCommand(command string, worker wr.Worker) {
+func (c *Client) processCommand(command string, worker Worker) {
 	switch command {
 
 	case "/check":

@@ -1,9 +1,8 @@
-package wr
+package tg
 
 import (
 	"app/internal/lib/e"
 	"app/internal/modules/hh"
-	"app/internal/modules/tg"
 	"app/internal/storage"
 	"errors"
 	"fmt"
@@ -34,11 +33,11 @@ type WorkingAgent struct {
 	vacancies       map[string]time.Time
 	mux             *sync.RWMutex
 	storage         storage.Storage
-	tgClient        tg.Telegramer
+	tgClient        Telegramer
 	hhClient        hh.HeadHunterer
 }
 
-func NewWorkingAgent(chatId int, interval time.Duration, store storage.Storage, tgClient tg.Telegramer, hhClient hh.HeadHunterer) *WorkingAgent {
+func NewWorkingAgent(chatId int, interval time.Duration, store storage.Storage, tgClient Telegramer, hhClient hh.HeadHunterer) *WorkingAgent {
 	w := &WorkingAgent{
 		chatId:          chatId,
 		stopWorking:     make(chan bool),
@@ -95,7 +94,7 @@ func (w *WorkingAgent) DoSearch(q Query) {
 			w.mux.Unlock()
 		}
 	}
-	log.Printf("conducted search: found %d vacancies for %s with experience %s\n", len(vacancies), q.Text, q.Experience)
+	log.Printf("conducted search: found %s%d%s vacancies for %s%s%s %s%s%s\n", Magenta, len(vacancies), Reset, Green, q.Text, Reset, Yellow, q.Experience, Reset)
 }
 
 func (w *WorkingAgent) HandleAddQuery(query string) (err error) {
@@ -228,5 +227,5 @@ func (w *WorkingAgent) initQueries() {
 		w.queries = append(w.queries, query)
 	}
 
-	log.Println("read", len(w.queries), "queries for chat", w.chatId)
+	log.Printf("read %s%d%s queries for %s%d%s", Magenta, len(w.queries), Reset, Green, w.chatId, Reset)
 }
